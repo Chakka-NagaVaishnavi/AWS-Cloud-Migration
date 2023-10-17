@@ -1,0 +1,1064 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  Features:
+      - 1 VPC with 2 AZs, each with one private and public subnet
+      - 1 internet gateway 
+      - 1 route 53 internal DNS      
+      - 2 nat gateways in each public subnet
+      - 1 ansible node in public subnet with external ssh access
+      - 1 jenkins node in public subnet with only 8080 external access and internal ssh access
+      - 1 server in private subnet and internal ssh access
+      - 1 EKS cluster
+      - 1 S3 backups bucket
+    
+############################ PARAMETERS GROUP AND ORDER DEFINITION ############################    
+Metadata: 
+  AWS::CloudFormation::Interface: 
+    ParameterGroups: 
+      - 
+        Label: 
+          default: "Buckets"
+        Parameters: 
+          - BackupsBucketName
+      - 
+        Label: 
+          default: "Network Configuration"
+        Parameters: 
+          - CIDRVPC
+          - CIDRPublicSubnetAZ1
+          - CIDRPublicSubnetAZ2
+          - CIDRPrivateSubnetAZ1
+          - CIDRPrivateSubnetAZ2
+          - CIDRPrivateKubernetesSubnetAZ1
+          - CIDRPrivateKubernetesSubnetAZ2
+          - CIDRPublicKubernetesSubnetAZ1
+          - CIDRPublicKubernetesSubnetAZ2
+          - InternalDomainName
+      - 
+        Label: 
+          default: "SSH Keys"
+        Parameters: 
+          - AnsibleManagedNodesKey
+          - AnsibleServerKey
+      - 
+        Label: 
+          default: "Instance Types"
+        Parameters: 
+          - AnsibleServerInstanceType
+          - JenkinsServerInstanceType
+      - 
+        Label: 
+          default: "Kubernetes Cluster"
+        Parameters: 
+          - EksClusterName
+          - MinNumberOfWorkerNodes
+          - DesiredNumberOfWorkerNodes
+          - MaxNumberOfWorkerNodes
+          - K8sWorkerNodesInstanceType
+          - KubernetesVersion
+
+############################ PARAMETERS ############################  
+Parameters:
+### Network Configuration
+  BackupsBucketName:
+    Description: >-
+      Backups Bucket Name
+    Type: String
+    Default: backups-bucket-ccbbaa112233
+    ConstraintDescription: must be unique or else it will fail
+### Network Configuration
+  CIDRVPC:
+    Description: >-
+      CIDR for the VPC
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 10.0.0.0/16
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid CIDR range of the form x.x.x.x/x.
+  CIDRPublicSubnetAZ1:
+    Description: >-
+      CIDR for the Public Subnet in AZ1
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 10.0.1.0/24
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid CIDR range of the form x.x.x.x/x.
+  CIDRPublicSubnetAZ2:
+    Description: >-
+      CIDR for the Public Subnet in AZ2
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 10.0.2.0/24
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid CIDR range of the form x.x.x.x/x.
+  CIDRPrivateSubnetAZ1:
+    Description: >-
+      CIDR for the Private Subnet in AZ1
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 10.0.11.0/24
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid CIDR range of the form x.x.x.x/x.
+  CIDRPrivateSubnetAZ2:
+    Description: >-
+      CIDR for the Private Subnet in AZ2
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 10.0.12.0/24
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid CIDR range of the form x.x.x.x/x.
+  CIDRPublicKubernetesSubnetAZ1:
+    Description: >-
+      CIDR for the Private K8s Subnet in AZ1
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 10.0.21.0/24
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid CIDR range of the form x.x.x.x/x.
+  CIDRPublicKubernetesSubnetAZ2:
+    Description: >-
+      CIDR for the Private K8s Subnet in AZ2
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 10.0.22.0/24
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid CIDR range of the form x.x.x.x/x.
+  CIDRPrivateKubernetesSubnetAZ1:
+    Description: >-
+      CIDR for the Private K8s Subnet in AZ1
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 10.0.31.0/24
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid CIDR range of the form x.x.x.x/x.
+  CIDRPrivateKubernetesSubnetAZ2:
+    Description: >-
+      CIDR for the Private K8s Subnet in AZ2
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 10.0.32.0/24
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid CIDR range of the form x.x.x.x/x.
+  InternalDomainName:
+    Description: Internal private DNS domain name
+    Type: String
+    Description: Domain name for the private hosted zone (e.g., example.com)
+    Default: dev.internal
+### SSH Keys
+  AnsibleServerKey:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the ansible instance
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+    Default: AnsibleKey
+  AnsibleManagedNodesKey:
+    Description: Name of an existing EC2 KeyPair to enable local SSH access to the instances managed by ansible
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+    Default: AnsibleManagedNodesKey
+### Instance Types
+  JenkinsServerInstanceType:
+    Description: JenkinsServer Server EC2 instance type
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t2.medium
+      - t2.xlarge
+    ConstraintDescription: must be a valid EC2 instance type.
+  AnsibleServerInstanceType:
+    Description: AnsibleServer Server EC2 instance type
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t2.medium
+      - t2.xlarge
+    ConstraintDescription: must be a valid EC2 instance type.
+    
+### Kubernetes Cluster
+  EksClusterName:
+    Type: String
+    Default: eks-cluster
+  MinNumberOfWorkerNodes:
+    Type: Number
+    Default: 1
+  DesiredNumberOfWorkerNodes:
+    Type: Number
+    Default: 2
+  MaxNumberOfWorkerNodes:
+    Type: Number
+    Default: 5
+  K8sWorkerNodesInstanceType:
+    Type: String
+    Default: t2.micro
+  KubernetesVersion:
+    Type: String
+    Default: 1.27
+
+
+############################ MAPPINGS ############################ 
+
+Mappings:
+  AWSRegionArch2AMI: 
+    eu-central-1: 
+      AMI: ami-088e71edb8795252f
+    eu-north-1: 
+      AMI: ami-071df4a41c6f9ee2e
+    eu-west-1: 
+      AMI: ami-0f3164307ee5d695a
+    eu-west-2: 
+      AMI: ami-042fab99b38a3963d
+    eu-west-3: 
+      AMI: ami-0f82b13d37cd1e8cc
+
+Resources:
+          
+############################ NETWORK - VPC ############################ 
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: !Ref CIDRVPC
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      Tags:
+        - Key: Application
+          Value: !Ref 'AWS::StackId'
+        - Key: Network
+          Value: Public
+          
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: Application
+          Value: !Ref 'AWS::StackId'
+        - Key: Network
+          Value: Public
+  InternetGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+      
+############################ NETWORK - Route53 DNS ############################ 
+
+  PrivateHostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: !Ref InternalDomainName
+      VPCs:
+        - VPCRegion: !Ref 'AWS::Region'
+          VPCId: !Ref VPC
+    
+############################ PUBLIC NETWORKS ACLs ############################ 
+  PublicNetworkAcl:
+    Type: 'AWS::EC2::NetworkAcl'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Application
+          Value: !Ref 'AWS::StackId'
+        - Key: Network
+          Value: Public
+  InboundHTTPPublicNetworkAclEntry:
+    Type: 'AWS::EC2::NetworkAclEntry'
+    Properties:
+      NetworkAclId: !Ref PublicNetworkAcl
+      RuleNumber: '100'
+      Protocol: '6'
+      RuleAction: allow
+      Egress: 'false'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '8080'
+        To: '8080'
+  InboundDynamicPortPublicNetworkAclEntry:
+    Type: 'AWS::EC2::NetworkAclEntry'
+    Properties:
+      NetworkAclId: !Ref PublicNetworkAcl
+      RuleNumber: '101'
+      Protocol: '6'
+      RuleAction: allow
+      Egress: 'false'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '32768'
+        To: '65535'
+  InboundSSHPublicNetworkAclEntry:
+    Type: 'AWS::EC2::NetworkAclEntry'
+    Properties:
+      NetworkAclId: !Ref PublicNetworkAcl
+      RuleNumber: '102'
+      Protocol: '6'
+      RuleAction: allow
+      Egress: 'false'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '22'
+        To: '22'
+  InboundTrafficFromVpc:
+    Type: 'AWS::EC2::NetworkAclEntry'
+    Properties:
+      NetworkAclId: !Ref PublicNetworkAcl
+      RuleNumber: '103'
+      Protocol: '6'
+      RuleAction: allow
+      Egress: 'false'
+      CidrBlock: !Ref CIDRVPC
+      PortRange:
+        From: '0'
+        To: '65535'
+  OutboundPublicNetworkAclEntry:
+    Type: 'AWS::EC2::NetworkAclEntry'
+    Properties:
+      NetworkAclId: !Ref PublicNetworkAcl
+      RuleNumber: '100'
+      Protocol: '6'
+      RuleAction: allow
+      Egress: 'true'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '0'
+        To: '65535'
+  PublicSubnetNetworkAclAssociation1:
+    Type: 'AWS::EC2::SubnetNetworkAclAssociation'
+    Properties:
+      SubnetId: !Ref PublicSubnetAZ1
+      NetworkAclId: !Ref PublicNetworkAcl
+  PublicSubnetNetworkAclAssociation2:
+    Type: 'AWS::EC2::SubnetNetworkAclAssociation'
+    Properties:
+      SubnetId: !Ref PublicSubnetAZ2
+      NetworkAclId: !Ref PublicNetworkAcl
+
+############################ PUBLIC ROUTE TABLES ############################  
+ 
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: Public Subnets
+      - Key: Network
+        Value: Public
+
+  PublicSubnetInternetRoute:
+    DependsOn: InternetGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway  
+      
+############################ PUBLIC SUBNET - AZ1 ############################ 
+
+  PublicSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Metadata:
+      Comment: Subnet 01
+    Properties:
+      MapPublicIpOnLaunch: true
+      AvailabilityZone:
+        Fn::Select:
+        - '0'
+        - Fn::GetAZs:
+            Ref: AWS::Region
+      CidrBlock:
+        Ref: CIDRPublicKubernetesSubnetAZ1
+      VpcId:
+        Ref: VPC
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-PublicSubnetAZ1"
+      - Key: kubernetes.io/role/elb
+        Value: 1
+
+  NatGatewayAZ1:
+    DependsOn:
+    - NatGatewayEIpAz1
+    - PublicSubnetAZ1
+    - InternetGatewayAttachment
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt 'NatGatewayEIpAz1.AllocationId'
+      SubnetId: !Ref PublicSubnetAZ1
+      Tags:
+      - Key: Name
+        Value: !Sub '${AWS::StackName}-NatGatewayAZ1'
+
+  NatGatewayEIpAz1:
+    DependsOn:
+    - InternetGatewayAttachment
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      Domain: vpc
+
+  PublicSubnetAZ1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetAZ1
+      RouteTableId: !Ref PublicRouteTable
+
+############################ PUBLIC SUBNET - AZ2 ############################ 
+
+  PublicSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Metadata:
+      Comment: Subnet 02
+    Properties:
+      MapPublicIpOnLaunch: true
+      AvailabilityZone:
+        Fn::Select:
+        - '1'
+        - Fn::GetAZs:
+            Ref: AWS::Region
+      CidrBlock:
+        Ref: CIDRPublicKubernetesSubnetAZ2
+      VpcId:
+        Ref: VPC
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-PublicSubnetAZ2"
+      - Key: kubernetes.io/role/elb
+        Value: 1
+  NatGatewayAZ2:
+    DependsOn:
+    - NatGatewayEIpAz2
+    - PublicSubnetAZ2
+    - InternetGatewayAttachment
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt 'NatGatewayEIpAz2.AllocationId'
+      SubnetId: !Ref PublicSubnetAZ2
+      Tags:
+      - Key: Name
+        Value: !Sub '${AWS::StackName}-NatGatewayAZ2'
+  NatGatewayEIpAz2:
+    DependsOn:
+    - InternetGatewayAttachment
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      Domain: vpc
+  PublicSubnetAZ2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetAZ2
+      RouteTableId: !Ref PublicRouteTable
+############################ PRIVATE NETWORKS ACLs ############################ 
+  PrivateNetworkAcl:
+    Type: 'AWS::EC2::NetworkAcl'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Application
+          Value: !Ref 'AWS::StackId'
+        - Key: Network
+          Value: Private
+  InboundDynamicPortPrivateNetworkAclEntry:
+    Type: 'AWS::EC2::NetworkAclEntry'
+    Properties:
+      NetworkAclId: !Ref PrivateNetworkAcl
+      RuleNumber: '101'
+      Protocol: '6'
+      RuleAction: allow
+      Egress: 'false'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '32768'
+        To: '65535'
+  InboundSSHPrivateNetworkAclEntry:
+    Type: 'AWS::EC2::NetworkAclEntry'
+    Properties:
+      NetworkAclId: !Ref PrivateNetworkAcl
+      RuleNumber: '102'
+      Protocol: '6'
+      RuleAction: allow
+      Egress: 'false'
+      CidrBlock: !Ref CIDRVPC
+      PortRange:
+        From: '22'
+        To: '22'
+  OutboundPrivateNetworkAclEntry:
+    Type: 'AWS::EC2::NetworkAclEntry'
+    Properties:
+      NetworkAclId: !Ref PrivateNetworkAcl
+      RuleNumber: '100'
+      Protocol: '6'
+      RuleAction: allow
+      Egress: 'true'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '0'
+        To: '65535'
+
+############################ PRIVATE ROUTE TABLES ############################ 
+
+  PrivateRouteTable1:
+    DependsOn:
+      - InternetGatewayAttachment
+      - NatGatewayAZ2
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Application
+          Value: !Ref 'AWS::StackId'
+        - Key: Network
+          Value: Private
+  NatGatewayRoute1:
+    Type: 'AWS::EC2::Route'
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref NatGatewayAZ1  
+
+  PrivateRouteTable2:
+    DependsOn:
+      - InternetGatewayAttachment
+      - NatGatewayAZ2
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Application
+          Value: !Ref 'AWS::StackId'
+        - Key: Network
+          Value: Private
+  NatGatewayRoute2:
+    Type: 'AWS::EC2::Route'
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref NatGatewayAZ2    
+      
+############################ PRIVATE SUBNET - AZ1 ############################
+
+  PrivateSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref CIDRPrivateSubnetAZ1
+      AvailabilityZone: !Select 
+        - 0
+        - !GetAZs ''
+      Tags:
+        - Key: Application
+          Value: !Ref 'AWS::StackId'
+        - Key: Network
+          Value: Private
+  PrivateSubnetRouteTableAssociation1:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable1
+
+  PrivateSubnetNetworkAclAssociation1:
+    Type: 'AWS::EC2::SubnetNetworkAclAssociation'
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      NetworkAclId: !Ref PrivateNetworkAcl
+           
+############################ PRIVATE SUBNET - AZ2 ############################ 
+
+  PrivateSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref CIDRPrivateSubnetAZ2
+      AvailabilityZone: !Select 
+        - 1
+        - !GetAZs ''
+      Tags:
+        - Key: Application
+          Value: !Ref 'AWS::StackId'
+        - Key: Network
+          Value: Private
+  PrivateSubnetRouteTableAssociation2:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable2
+
+  PrivateSubnetNetworkAclAssociation2:
+    Type: 'AWS::EC2::SubnetNetworkAclAssociation'
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      NetworkAclId: !Ref PrivateNetworkAcl
+  
+
+
+
+############################ PRIVATE KUBERNETES SUBNET - AZ1 ############################
+  K8sPrivateSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Metadata:
+      Comment: Subnet 03
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+        - '0'
+        - Fn::GetAZs:
+            Ref: AWS::Region
+      CidrBlock:
+        Ref: CIDRPrivateKubernetesSubnetAZ1
+      VpcId:
+        Ref: VPC
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-K8sPrivateSubnetAZ1"
+      - Key: kubernetes.io/role/internal-elb
+        Value: 1
+  K8SPrivateRouteTableAZ1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: Private Subnet AZ1
+      - Key: Network
+        Value: Private01
+  K8SPrivateInternetRouteAZ1:
+    DependsOn:
+    - InternetGatewayAttachment
+    - NatGatewayAZ1
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref K8SPrivateRouteTableAZ1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayAZ1
+  K8sPrivateSubnetAZ1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref K8sPrivateSubnetAZ1
+      RouteTableId: !Ref K8SPrivateRouteTableAZ1
+      
+############################ PRIVATE KUBERNETES SUBNET - AZ2 ############################
+
+  K8sPrivateSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Metadata:
+      Comment: Private Subnet 02
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+        - '1'
+        - Fn::GetAZs:
+            Ref: AWS::Region
+      CidrBlock:
+        Ref: CIDRPrivateKubernetesSubnetAZ2
+      VpcId:
+        Ref: VPC
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-K8sPrivateSubnetAZ2"
+      - Key: kubernetes.io/role/internal-elb
+        Value: 1
+  K8SPrivateRouteTableAZ2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: Private Subnet AZ2
+      - Key: Network
+        Value: Private02
+  K8SPrivateInternetRouteAZ2:
+    DependsOn:
+    - InternetGatewayAttachment
+    - NatGatewayAZ2
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref K8SPrivateRouteTableAZ2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayAZ2
+  K8sPrivateSubnetAZ2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref K8sPrivateSubnetAZ2
+      RouteTableId: !Ref K8SPrivateRouteTableAZ2      
+      
+ ############################ BACKUPS BUCKET ############################   
+  BackupsBucket:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      BucketName: !Ref BackupsBucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+ 
+ ############################ Jenkins INSTANCE ############################   
+ 
+  JenkinsEC2Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      InstanceType: !Ref JenkinsServerInstanceType
+      NetworkInterfaces:
+        - GroupSet:
+            - !Ref JenkinsInstanceSecurityGroup
+          AssociatePublicIpAddress: 'true'
+          DeviceIndex: '0'
+          DeleteOnTermination: 'true'
+          SubnetId: !Ref PublicSubnetAZ2
+      KeyName: !Ref AnsibleManagedNodesKey
+      ImageId: !FindInMap 
+        - AWSRegionArch2AMI
+        - !Ref 'AWS::Region'
+        - AMI
+      IamInstanceProfile: !Ref JenkinsInstanceProfile
+      UserData: 
+        Fn::Base64: !Sub |
+          #!/bin/bash -x
+          yum install docker -y
+          systemctl enable docker
+          usermod -a -G docker ec2-user
+          id ec2-user
+          newgrp docker
+          sudo yum install cronie -y
+          sudo systemctl enable crond.service
+          crontab -l | { cat; echo "* * * 2 * aws s3 cp --recursive /var/lib/jenkins/ s3://${BackupsBucketName}/Jenkins/\$(date +\%Y-\%m-\%d)/"; } | crontab -
+
+  JenkinsNodeRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:PutObject'
+                  - 's3:ListBucket'
+                Resource:
+                  - !Sub 'arn:aws:s3:::${BackupsBucketName}/*'
+                  - !Sub 'arn:aws:s3:::${BackupsBucketName}'
+        - PolicyName: ECRFullAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ecr:GetDownloadUrlForLayer'
+                  - 'ecr:GetRepositoryPolicy'
+                  - 'ecr:ListImages'
+                  - 'ecr:DescribeRepositories'
+                  - 'ecr:GetLifecyclePolicy'
+                  - 'ecr:GetLifecyclePolicyPreview'
+                  - 'ecr:GetImage'
+                  - 'ecr:BatchCheckLayerAvailability'
+                  - 'ecr:GetObject'
+                  - 'ecr:InitiateLayerUpload'
+                  - 'ecr:UploadLayerPart'
+                  - 'ecr:CompleteLayerUpload'
+                Resource: !GetAtt ECR.Arn
+        
+  JenkinsInstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Roles:
+        - !Ref JenkinsNodeRole
+
+  JenkinsInstanceSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Enable SSH access via port 22 and http 8080
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '8080'
+          ToPort: '8080'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: !Ref CIDRVPC
+
+  JenkinsDnsRecordA:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref PrivateHostedZone
+      Name:
+        Fn::Sub:
+          - "${InstanceName}${ExternalValue}"
+          - InstanceName: "jenkins."
+            ExternalValue: !Ref InternalDomainName
+      Type: A
+      TTL: 60
+      ResourceRecords:
+        - !GetAtt JenkinsEC2Instance.PrivateIp 
+
+        
+ ############################ ANSIBLE INSTANCE ############################          
+  AnsibleEC2Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      InstanceType: !Ref AnsibleServerInstanceType
+      NetworkInterfaces:
+        - GroupSet:
+            - !Ref AnsibleInstanceSecurityGroup
+          AssociatePublicIpAddress: 'true'
+          DeviceIndex: '0'
+          DeleteOnTermination: 'true'
+          SubnetId: !Ref PublicSubnetAZ1
+      KeyName: !Ref AnsibleServerKey
+      ImageId: !FindInMap 
+        - AWSRegionArch2AMI
+        - !Ref 'AWS::Region'
+        - AMI
+      UserData: 
+        Fn::Base64: !Sub |
+          #!/bin/bash -x
+          touch /etc/ansible/hosts
+          yum install -y ansible
+          touch /etc/ansible/hosts
+          echo "[jenkins]" >> /etc/ansible/hosts
+          echo 'jenkins.${InternalDomainName}' >> /etc/ansible/hosts
+          echo hola
+          echo ${InternalDomainName}
+
+  AnsibleInstanceSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Enable SSH access via port 22
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: 0.0.0.0/0    
+
+ ############################ Private INSTANCE ############################          
+#  PrivateEC2Instance:
+#    Type: 'AWS::EC2::Instance'
+#    Properties:
+#      InstanceType: !Ref JenkinsServerInstanceType
+#      NetworkInterfaces:
+#        - GroupSet:
+#            - !Ref PrivateInstanceSecurityGroup
+#          AssociatePublicIpAddress: 'false'
+#          DeviceIndex: '0'
+#          DeleteOnTermination: 'true'
+#          SubnetId: !Ref PrivateSubnet1
+#      KeyName: !Ref AnsibleManagedNodesKey
+#      ImageId: !FindInMap 
+#        - AWSRegionArch2AMI
+#        - !Ref 'AWS::Region'
+#        - AMI
+#
+#  PrivateInstanceSecurityGroup:
+#    Type: 'AWS::EC2::SecurityGroup'
+#    Properties:
+#      VpcId: !Ref VPC
+#      GroupDescription: Enable SSH access via port 22 and http 8080
+#      SecurityGroupIngress:
+#        - IpProtocol: tcp
+#          FromPort: '22'
+#          ToPort: '22'
+#          CidrIp: !Ref CIDRVPC    
+#
+#  PrivateInstanceDnsRecordA:
+#    Type: AWS::Route53::RecordSet
+#    Properties:
+#      HostedZoneId: !Ref PrivateHostedZone
+#      Name:
+#        Fn::Sub:
+#          - "${InstanceName}${ExternalValue}"
+#          - InstanceName: "private.instance."
+#            ExternalValue: !Ref InternalDomainName
+#      Type: A
+#      TTL: 60
+#      ResourceRecords:
+#        - !GetAtt PrivateEC2Instance.PrivateIp
+        
+############################ KUBERNETES EKS CLUSTER ############################
+
+  K8sControlPlaneSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Cluster communication with worker nodes
+      VpcId: !Ref VPC
+
+  ###########################################
+  ## Roles
+  ###########################################
+  EksRole:
+    Type: AWS::IAM::Role
+    Properties: 
+      RoleName: my.eks.cluster.role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - eks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+  EksNodeRole:
+    Type: AWS::IAM::Role
+    Properties: 
+      RoleName: my.eks.node.role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+        - "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+        - "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+
+  ###########################################
+  ## Eks Cluster
+  ###########################################
+
+#  EksCluster:
+#    Type: AWS::EKS::Cluster
+#    Properties:
+#      Name: !Ref EksClusterName
+#      Version: !Ref KubernetesVersion
+#      RoleArn: !GetAtt EksRole.Arn
+#      ResourcesVpcConfig:
+#        SecurityGroupIds:
+#          - !Ref K8sControlPlaneSecurityGroup
+#        SubnetIds:
+#        - !Ref K8sPrivateSubnetAZ1
+#        - !Ref K8sPrivateSubnetAZ2
+#
+#  EksNodegroup:
+#    Type: AWS::EKS::Nodegroup
+#    DependsOn: EksCluster
+#    Properties:
+#      ClusterName: !Ref EksClusterName
+#      NodeRole: !GetAtt EksNodeRole.Arn
+#      InstanceTypes:
+#        - !Ref K8sWorkerNodesInstanceType 
+#      RemoteAccess:
+#        Ec2SshKey: !Ref AnsibleManagedNodesKey
+#        SourceSecurityGroups: 
+#          - !Ref EksWorkersSecurityGroup
+#      ScalingConfig:
+#        MinSize:
+#          Ref: MinNumberOfWorkerNodes
+#        DesiredSize:
+#          Ref: DesiredNumberOfWorkerNodes
+#        MaxSize:
+#          Ref: MaxNumberOfWorkerNodes
+#      Subnets:
+#        - !Ref K8sPrivateSubnetAZ1
+#        - !Ref K8sPrivateSubnetAZ2
+# 
+#  EksWorkersSecurityGroup:
+#    Type: 'AWS::EC2::SecurityGroup'
+#    Properties:
+#      GroupDescription: >-
+#        Allow access from load balancer and bastion as well as outbound HTTP and
+#        HTTPS traffic
+#      VpcId: !Ref VPC
+#      SecurityGroupIngress:
+#        - IpProtocol: tcp
+#          FromPort: '80'
+#          ToPort: '8080'
+#          CidrIp: 0.0.0.0/0
+#        - IpProtocol: tcp
+#          FromPort: '22'
+#          ToPort: '22'
+#          CidrIp: 0.0.0.0/0
+
+ ############################ ECR REGISTRY ############################    
+  EcrNodeRole:
+    Type: AWS::IAM::Role
+    Properties: 
+      RoleName: my.ecr.role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess"
+
+ 
+  ECR:
+    Type: AWS::ECR::Repository
+    Properties:
+#            RepositoryName: !Sub ${AWS::StackName}-nginx
+        RepositoryPolicyText:
+            Version: "2012-10-17"
+            Statement:
+                -
+                  Sid: AllowPushPull
+                  Effect: Allow
+                  Principal:
+                    AWS:
+                      - !Sub arn:aws:iam::${AWS::AccountId}:role/${EcrNodeRole}
+                  Action:
+                    - "ecr:GetDownloadUrlForLayer"
+                    - "ecr:BatchGetImage"
+                    - "ecr:BatchCheckLayerAvailability"
+                    - "ecr:PutImage"
+                    - "ecr:InitiateLayerUpload"
+                    - "ecr:UploadLayerPart"
+                    - "ecr:CompleteLayerUpload"   
+
+ ############################ OUTPUTS ############################                        
+Outputs:
+  PublicSubnetIds:
+    Description: Public Subnets IDs in the VPC
+    Value: !Join [ ",", [ !Ref PublicSubnetAZ1, !Ref PublicSubnetAZ2 ] ]
+    Export:
+      Name: PublicSubnetIds
+  
+  PrivateSubnetIds:
+    Description: Private Subnets IDs in the VPC
+    Value: !Join [ ",", [ !Ref K8sPrivateSubnetAZ1, !Ref K8sPrivateSubnetAZ2 ] ]
+    Export:
+      Name: PrivateSubnetIds
+
+  K8sControlPlaneSecurityGroupId:
+    Description: Security group for the cluster control plane communication with worker nodes
+    Value: !Ref K8sControlPlaneSecurityGroup
+    Export:
+      Name: K8sControlPlaneSecurityGroupId
+
+  VpcId:
+    Description: The VPC Id
+    Value: !Ref VPC
+    Export:
+      Name: VpcId
+
